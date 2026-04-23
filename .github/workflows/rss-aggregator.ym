@@ -1,0 +1,27 @@
+name: RSS Aggregator
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # Every 6 hours — adjust as needed
+  workflow_dispatch:          # Manual trigger from GitHub UI
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run RSS Aggregator
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node index.js
