@@ -31,6 +31,17 @@ function toTimestamp(dateStr) {
   return isNaN(d) ? admin.firestore.Timestamp.now() : admin.firestore.Timestamp.fromDate(d);
 }
 
+function slugify(text) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\w\u0600-\u06FF-]+/g, "")
+    .replace(/--+/g, "-")
+    .slice(0, 100);
+}
+
 function extractImageUrl(item) {
   if (item.mediaContent?.$?.url) return item.mediaContent.$.url;
   if (item.mediaThumbnail?.$?.url) return item.mediaThumbnail.$.url;
@@ -46,8 +57,40 @@ function extractImageUrl(item) {
   return null;
 }
 
+async function cleanOldArticles(monthsOld = 3) {
+  console.log(`Cleaning articles older than ${monthsOld} months...`);
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - monthsOld);
+  const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoff);
+
+  const oldSnap = await db
+    .collection("rss_articles")
+    .where("pubDate", "<", cutoffTimestamp)
+    .get();
+
+  if (oldSnap.empty) {
+    console.log("No old articles to delete.");
+    return;
+  }
+
+  let batch = db.batch();
+  let count = 0;
+  for (const doc of oldSnap.docs) {
+    batch.delete(doc.ref);
+    count++;
+    if (count % 499 === 0) {
+      await batch.commit();
+      batch = db.batch();
+    }
+  }
+  if (count % 499 !== 0) await batch.commit();
+  console.log(`Deleted ${count} old article(s).`);
+}
+
 async function run() {
   console.log("RSS Aggregator started");
+
+  await cleanOldArticles(3);
 
   const sourcesSnap = await db
     .collection("rss")
@@ -94,10 +137,12 @@ async function run() {
 
       const imageUrl = extractImageUrl(item);
       const docId = hashLink(link);
+      const slug = slugify(item.title || docId);
       const docRef = db.collection("rss_articles").doc(docId);
 
       batch.set(docRef, {
         title: item.title || "Untitled",
+        slug,
         link,
         description: item.contentSnippet || item.summary || "",
         imageUrl: imageUrl || null,
@@ -111,15 +156,10 @@ async function run() {
       });
 
       newCount++;
-
-      if (newCount % 499 === 0) {
-        await batch.commit();
-      }
+      if (newCount % 499 === 0) await batch.commit();
     }
 
-    if (newCount > 0) {
-      await batch.commit();
-    }
+    if (newCount > 0) await batch.commit();
 
     await sourceDoc.ref.update({
       lastFetched: admin.firestore.Timestamp.now(),
