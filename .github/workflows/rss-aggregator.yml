@@ -2,8 +2,8 @@ name: RSS Aggregator
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # Every 6 hours — adjust as needed
-  workflow_dispatch:          # Manual trigger from GitHub UI
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
 
 jobs:
   aggregate:
@@ -16,10 +16,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run RSS Aggregator
         env:
