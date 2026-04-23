@@ -2,7 +2,6 @@ import admin from "firebase-admin";
 import Parser from "rss-parser";
 import crypto from "crypto";
 
-// ─── Firebase Init ───────────────────────────────────────────────
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
@@ -15,7 +14,6 @@ const parser = new Parser({
   headers: { "User-Agent": "RSSAggregator/1.0" },
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────
 function hashLink(link) {
   return crypto.createHash("md5").update(link).digest("hex");
 }
@@ -26,14 +24,13 @@ function toTimestamp(dateStr) {
   return isNaN(d) ? admin.firestore.Timestamp.now() : admin.firestore.Timestamp.fromDate(d);
 }
 
-// ─── Main ─────────────────────────────────────────────────────────
 async function run() {
   console.log("🚀 RSS Aggregator started");
 
-  // 1. Fetch active sources (1 read per source document)
+  // Read from your existing "rss" collection
   const sourcesSnap = await db
-    .collection("rss_sources")
-    .where("active", "==", true)
+    .collection("rss")
+    .where("status", "==", "active")
     .get();
 
   if (sourcesSnap.empty) {
@@ -47,13 +44,20 @@ async function run() {
     const source = sourceDoc.data();
     const sourceId = sourceDoc.id;
 
-    console.log(`\n🔗 Fetching: ${source.name} — ${source.url}`);
+    // Use stream_link as the RSS feed URL
+    const feedUrl = source.stream_link;
+    if (!feedUrl) {
+      console.log(`  ⚠️ Skipping ${source.name} — no stream_link`);
+      continue;
+    }
+
+    console.log(`\n🔗 Fetching: ${source.name} — ${feedUrl}`);
 
     let feed;
     try {
-      feed = await parser.parseURL(source.url);
+      feed = await parser.parseURL(feedUrl);
     } catch (err) {
-      console.error(`  ❌ Failed to fetch ${source.url}:`, err.message);
+      console.error(`  ❌ Failed to fetch ${feedUrl}:`, err.message);
       continue;
     }
 
@@ -65,30 +69,27 @@ async function run() {
       const link = item.link || item.guid;
       if (!link) continue;
 
-      // Only process articles newer than lastFetched (quota saver)
       const pubDate = item.pubDate ? new Date(item.pubDate) : null;
       if (pubDate && pubDate <= lastFetched) continue;
 
       const docId = hashLink(link);
       const docRef = db.collection("rss_articles").doc(docId);
 
-      batch.set(
-        docRef,
-        {
-          title: item.title || "Untitled",
-          link,
-          description: item.contentSnippet || item.summary || "",
-          pubDate: toTimestamp(item.pubDate),
-          sourceId,
-          sourceName: source.name || "",
-          fetchedAt: admin.firestore.Timestamp.now(),
-        },
-        { merge: false } // don't overwrite existing = saves writes
-      );
+      batch.set(docRef, {
+        title: item.title || "Untitled",
+        link,
+        description: item.contentSnippet || item.summary || "",
+        pubDate: toTimestamp(item.pubDate),
+        sourceId,
+        sourceName: source.name || "",
+        sourceGenre: source.genre || "",
+        sourceLanguage: source.language || "",
+        sourceLogo: source.logoUrl || source.logo_url || "",
+        fetchedAt: admin.firestore.Timestamp.now(),
+      });
 
       newCount++;
 
-      // Firestore batch limit = 500
       if (newCount % 499 === 0) {
         await batch.commit();
         console.log(`  ✅ Committed 499 articles`);
@@ -99,12 +100,12 @@ async function run() {
       await batch.commit();
     }
 
-    // Update lastFetched on source (1 write per source)
+    // Save lastFetched to avoid re-fetching same articles
     await sourceDoc.ref.update({
       lastFetched: admin.firestore.Timestamp.now(),
     });
 
-    console.log(`  ✅ Added ${newCount} new article(s)`);
+    console.log(`  ✅ Added ${newCount} new article(s) from ${source.name}`);
   }
 
   console.log("\n✅ Done.");
