@@ -17,6 +17,7 @@ const parser = new Parser({
       ["media:content", "mediaContent"],
       ["media:thumbnail", "mediaThumbnail"],
       ["enclosure", "enclosure"],
+      ["category", "categories"],
     ],
   },
 });
@@ -55,6 +56,23 @@ function extractImageUrl(item) {
     if (match) return match[1];
   }
   return null;
+}
+
+function extractCategories(item) {
+  let cats = [];
+
+  if (Array.isArray(item.categories)) {
+    cats = item.categories;
+  } else if (typeof item.categories === "string") {
+    cats = [item.categories];
+  } else if (item.category) {
+    cats = Array.isArray(item.category) ? item.category : [item.category];
+  }
+
+  return cats
+    .map((c) => (typeof c === "object" ? c._ || c["$t"] || "" : c))
+    .map((c) => c.toString().trim())
+    .filter((c) => c.length > 0);
 }
 
 async function cleanOldArticles(monthsOld = 3) {
@@ -125,7 +143,7 @@ async function run() {
     }
 
     const lastFetched = source.lastFetched?.toDate() || new Date(0);
-    const batch = db.batch();
+    let batch = db.batch();
     let newCount = 0;
 
     for (const item of feed.items) {
@@ -136,6 +154,7 @@ async function run() {
       if (pubDate && pubDate <= lastFetched) continue;
 
       const imageUrl = extractImageUrl(item);
+      const categories = extractCategories(item);
       const docId = hashLink(link);
       const slug = slugify(item.title || docId);
       const docRef = db.collection("rss_articles").doc(docId);
@@ -146,17 +165,21 @@ async function run() {
         link,
         description: item.contentSnippet || item.summary || "",
         imageUrl: imageUrl || null,
+        categories: categories,
+        sourceGenre: source.genre || "",
         pubDate: toTimestamp(item.pubDate),
         sourceId,
         sourceName: source.name || "",
-        sourceGenre: source.genre || "",
         sourceLanguage: source.language || "",
         sourceLogo: source.logoUrl || source.logo_url || "",
         fetchedAt: admin.firestore.Timestamp.now(),
       });
 
       newCount++;
-      if (newCount % 499 === 0) await batch.commit();
+      if (newCount % 499 === 0) {
+        await batch.commit();
+        batch = db.batch();
+      }
     }
 
     if (newCount > 0) await batch.commit();
