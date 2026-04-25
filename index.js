@@ -69,7 +69,7 @@ function extractCategories(item) {
     .filter((c) => c.length > 0);
 }
 
-function withTimeout(promise, ms, label) {
+function withTimeout(promise, ms) {
   return Promise.race([
     promise,
     new Promise((_, reject) =>
@@ -79,7 +79,8 @@ function withTimeout(promise, ms, label) {
 }
 
 async function cleanOldArticles(monthsOld = 3) {
-  console.log(`Cleaning articles fetched more than ${monthsOld} months ago...`);
+  const t0 = Date.now();
+  console.log(`[clean] starting...`);
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - monthsOld);
   const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoff);
@@ -90,7 +91,7 @@ async function cleanOldArticles(monthsOld = 3) {
     .get();
 
   if (oldSnap.empty) {
-    console.log("No old articles to delete.");
+    console.log(`[clean] no old articles (${Date.now() - t0}ms)`);
     return;
   }
 
@@ -105,7 +106,7 @@ async function cleanOldArticles(monthsOld = 3) {
     }
   }
   if (count % 499 !== 0) await batch.commit();
-  console.log(`Deleted ${count} old article(s).`);
+  console.log(`[clean] deleted ${count} (${Date.now() - t0}ms)`);
 }
 
 async function processSource(sourceDoc) {
@@ -113,20 +114,17 @@ async function processSource(sourceDoc) {
   const sourceId = sourceDoc.id;
   const feedUrl = source.stream_link;
 
-  if (!feedUrl) {
-    console.log(`Skipping ${source.name} — no stream_link`);
-    return;
-  }
+  if (!feedUrl) return;
 
-  console.log(`Fetching: ${source.name}`);
-
+  const t0 = Date.now();
   let feed;
   try {
-    feed = await withTimeout(parser.parseURL(feedUrl), 20000, source.name);
+    feed = await withTimeout(parser.parseURL(feedUrl), 20000);
   } catch (err) {
-    console.error(`Failed to fetch ${source.name}: ${err.message}`);
+    console.error(`[${source.name}] fetch failed: ${err.message} (${Date.now() - t0}ms)`);
     return;
   }
+  const tFetched = Date.now();
 
   const lastFetched = source.lastFetched?.toDate() || new Date(0);
   let batch = db.batch();
@@ -174,32 +172,42 @@ async function processSource(sourceDoc) {
     lastFetched: admin.firestore.Timestamp.now(),
   });
 
-  console.log(`Added ${newCount} from ${source.name}`);
+  const tDone = Date.now();
+  console.log(
+    `[${source.name}] +${newCount} | fetch=${tFetched - t0}ms write=${tDone - tFetched}ms total=${tDone - t0}ms`
+  );
 }
 
 async function run() {
+  const tStart = Date.now();
   console.log("RSS Aggregator started");
 
   await cleanOldArticles(3);
 
+  const tQ = Date.now();
   const sourcesSnap = await db
     .collection("rss")
     .where("status", "==", "active")
     .get();
+  console.log(`[sources] loaded ${sourcesSnap.size} (${Date.now() - tQ}ms)`);
 
-  if (sourcesSnap.empty) {
-    console.log("No active sources found.");
-    return;
-  }
-
-  console.log(`Found ${sourcesSnap.size} active source(s)`);
+  if (sourcesSnap.empty) return;
 
   await Promise.allSettled(sourcesSnap.docs.map(processSource));
 
-  console.log("Done.");
+  console.log(`[total] run() done in ${Date.now() - tStart}ms`);
 }
 
-run().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+(async () => {
+  try {
+    await run();
+  } catch (err) {
+    console.error("Fatal error:", err);
+    process.exitCode = 1;
+  } finally {
+    const tT = Date.now();
+    await admin.app().delete();
+    console.log(`[shutdown] firebase closed in ${Date.now() - tT}ms, exiting`);
+    process.exit(process.exitCode || 0);
+  }
+})();
