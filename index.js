@@ -69,6 +69,15 @@ function extractCategories(item) {
     .filter((c) => c.length > 0);
 }
 
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Hard timeout ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 async function cleanOldArticles(monthsOld = 3) {
   console.log(`Cleaning articles fetched more than ${monthsOld} months ago...`);
   const cutoff = new Date();
@@ -113,7 +122,7 @@ async function processSource(sourceDoc) {
 
   let feed;
   try {
-    feed = await parser.parseURL(feedUrl);
+    feed = await withTimeout(parser.parseURL(feedUrl), 20000, source.name);
   } catch (err) {
     console.error(`Failed to fetch ${source.name}: ${err.message}`);
     return;
