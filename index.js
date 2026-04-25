@@ -60,15 +60,9 @@ function extractImageUrl(item) {
 
 function extractCategories(item) {
   let cats = [];
-
-  if (Array.isArray(item.categories)) {
-    cats = item.categories;
-  } else if (typeof item.categories === "string") {
-    cats = [item.categories];
-  } else if (item.category) {
-    cats = Array.isArray(item.category) ? item.category : [item.category];
-  }
-
+  if (Array.isArray(item.categories)) cats = item.categories;
+  else if (typeof item.categories === "string") cats = [item.categories];
+  else if (item.category) cats = Array.isArray(item.category) ? item.category : [item.category];
   return cats
     .map((c) => (typeof c === "object" ? c._ || c["$t"] || "" : c))
     .map((c) => c.toString().trim())
@@ -76,14 +70,14 @@ function extractCategories(item) {
 }
 
 async function cleanOldArticles(monthsOld = 3) {
-  console.log(`Cleaning articles older than ${monthsOld} months...`);
+  console.log(`Cleaning articles fetched more than ${monthsOld} months ago...`);
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - monthsOld);
   const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoff);
 
   const oldSnap = await db
     .collection("rss_articles")
-    .where("pubDate", "<", cutoffTimestamp)
+    .where("fetchedAt", "<", cutoffTimestamp)
     .get();
 
   if (oldSnap.empty) {
@@ -105,6 +99,75 @@ async function cleanOldArticles(monthsOld = 3) {
   console.log(`Deleted ${count} old article(s).`);
 }
 
+async function processSource(sourceDoc) {
+  const source = sourceDoc.data();
+  const sourceId = sourceDoc.id;
+  const feedUrl = source.stream_link;
+
+  if (!feedUrl) {
+    console.log(`Skipping ${source.name} — no stream_link`);
+    return;
+  }
+
+  console.log(`Fetching: ${source.name}`);
+
+  let feed;
+  try {
+    feed = await parser.parseURL(feedUrl);
+  } catch (err) {
+    console.error(`Failed to fetch ${source.name}: ${err.message}`);
+    return;
+  }
+
+  const lastFetched = source.lastFetched?.toDate() || new Date(0);
+  let batch = db.batch();
+  let newCount = 0;
+
+  for (const item of feed.items) {
+    const link = item.link || item.guid;
+    if (!link) continue;
+
+    const pubDate = item.pubDate ? new Date(item.pubDate) : null;
+    if (pubDate && pubDate <= lastFetched) continue;
+
+    const imageUrl = extractImageUrl(item);
+    const categories = extractCategories(item);
+    const docId = hashLink(link);
+    const slug = slugify(item.title || docId);
+    const docRef = db.collection("rss_articles").doc(docId);
+
+    batch.set(docRef, {
+      title: item.title || "Untitled",
+      slug,
+      link,
+      description: item.contentSnippet || item.summary || "",
+      imageUrl: imageUrl || null,
+      categories,
+      sourceGenre: source.genre || "",
+      pubDate: toTimestamp(item.pubDate),
+      sourceId,
+      sourceName: source.name || "",
+      sourceLanguage: source.language || "",
+      sourceLogo: source.logoUrl || source.logo_url || "",
+      fetchedAt: admin.firestore.Timestamp.now(),
+    });
+
+    newCount++;
+    if (newCount % 499 === 0) {
+      await batch.commit();
+      batch = db.batch();
+    }
+  }
+
+  if (newCount % 499 !== 0 && newCount > 0) await batch.commit();
+
+  await sourceDoc.ref.update({
+    lastFetched: admin.firestore.Timestamp.now(),
+  });
+
+  console.log(`Added ${newCount} from ${source.name}`);
+}
+
 async function run() {
   console.log("RSS Aggregator started");
 
@@ -122,74 +185,7 @@ async function run() {
 
   console.log(`Found ${sourcesSnap.size} active source(s)`);
 
-  for (const sourceDoc of sourcesSnap.docs) {
-    const source = sourceDoc.data();
-    const sourceId = sourceDoc.id;
-
-    const feedUrl = source.stream_link;
-    if (!feedUrl) {
-      console.log(`Skipping ${source.name} — no stream_link`);
-      continue;
-    }
-
-    console.log(`Fetching: ${source.name} — ${feedUrl}`);
-
-    let feed;
-    try {
-      feed = await parser.parseURL(feedUrl);
-    } catch (err) {
-      console.error(`Failed to fetch ${feedUrl}:`, err.message);
-      continue;
-    }
-
-    const lastFetched = source.lastFetched?.toDate() || new Date(0);
-    let batch = db.batch();
-    let newCount = 0;
-
-    for (const item of feed.items) {
-      const link = item.link || item.guid;
-      if (!link) continue;
-
-      const pubDate = item.pubDate ? new Date(item.pubDate) : null;
-      if (pubDate && pubDate <= lastFetched) continue;
-
-      const imageUrl = extractImageUrl(item);
-      const categories = extractCategories(item);
-      const docId = hashLink(link);
-      const slug = slugify(item.title || docId);
-      const docRef = db.collection("rss_articles").doc(docId);
-
-      batch.set(docRef, {
-        title: item.title || "Untitled",
-        slug,
-        link,
-        description: item.contentSnippet || item.summary || "",
-        imageUrl: imageUrl || null,
-        categories: categories,
-        sourceGenre: source.genre || "",
-        pubDate: toTimestamp(item.pubDate),
-        sourceId,
-        sourceName: source.name || "",
-        sourceLanguage: source.language || "",
-        sourceLogo: source.logoUrl || source.logo_url || "",
-        fetchedAt: admin.firestore.Timestamp.now(),
-      });
-
-      newCount++;
-      if (newCount % 499 === 0) {
-        await batch.commit();
-        batch = db.batch();
-      }
-    }
-
-    if (newCount > 0) await batch.commit();
-
-    await sourceDoc.ref.update({
-      lastFetched: admin.firestore.Timestamp.now(),
-    });
-
-    console.log(`Added ${newCount} new article(s) from ${source.name}`);
-  }
+  await Promise.allSettled(sourcesSnap.docs.map(processSource));
 
   console.log("Done.");
 }
