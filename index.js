@@ -129,6 +129,7 @@ async function processSource(sourceDoc) {
   const lastFetched = source.lastFetched?.toDate() || new Date(0);
   let batch = db.batch();
   let newCount = 0;
+  let skipped = 0;
 
   for (const item of feed.items) {
     const link = item.link || item.guid;
@@ -137,18 +138,29 @@ async function processSource(sourceDoc) {
     const pubDate = item.pubDate ? new Date(item.pubDate) : null;
     if (pubDate && pubDate <= lastFetched) continue;
 
+    const title = item.title?.trim();
     const imageUrl = extractImageUrl(item);
+
+    if (!title || title.toLowerCase() === "untitled") {
+      skipped++;
+      continue;
+    }
+    if (!imageUrl) {
+      skipped++;
+      continue;
+    }
+
     const categories = extractCategories(item);
     const docId = hashLink(link);
-    const slug = slugify(item.title || docId);
+    const slug = slugify(title);
     const docRef = db.collection("rss_articles").doc(docId);
 
     batch.set(docRef, {
-      title: item.title || "Untitled",
+      title,
       slug,
       link,
       description: item.contentSnippet || item.summary || "",
-      imageUrl: imageUrl || null,
+      imageUrl,
       categories,
       sourceGenre: source.genre || "",
       pubDate: toTimestamp(item.pubDate),
@@ -174,7 +186,7 @@ async function processSource(sourceDoc) {
 
   const tDone = Date.now();
   console.log(
-    `[${source.name}] +${newCount} | fetch=${tFetched - t0}ms write=${tDone - tFetched}ms total=${tDone - t0}ms`
+    `[${source.name}] +${newCount} skipped=${skipped} | fetch=${tFetched - t0}ms write=${tDone - tFetched}ms total=${tDone - t0}ms`
   );
 }
 
