@@ -22,6 +22,8 @@ const parser = new Parser({
   },
 });
 
+const MAX_ARTICLES_PER_SOURCE = 5;
+
 function hashLink(link) {
   return crypto.createHash("md5").update(link).digest("hex");
 }
@@ -41,6 +43,27 @@ function slugify(text) {
     .replace(/[^\w\u0600-\u06FF-]+/g, "")
     .replace(/--+/g, "-")
     .slice(0, 100);
+}
+
+// Encode Arabic/Unicode characters in URLs so rss-parser can fetch them
+function encodeRssUrl(rawUrl) {
+  try {
+    // Already valid ASCII URL — return as-is
+    new URL(rawUrl);
+    // Check if it contains non-ASCII characters
+    if (!/[^\x00-\x7F]/.test(rawUrl)) return rawUrl;
+    // Has non-ASCII (Arabic etc.) — encode the path/query parts only
+    const url = new URL(rawUrl);
+    url.pathname = url.pathname.split("/").map(segment => encodeURIComponent(decodeURIComponent(segment))).join("/");
+    url.search = url.search ? "?" + url.search.slice(1).split("&").map(p => {
+      const [k, v] = p.split("=");
+      return `${encodeURIComponent(decodeURIComponent(k || ""))}=${encodeURIComponent(decodeURIComponent(v || ""))}`;
+    }).join("&") : "";
+    return url.toString();
+  } catch {
+    // Fallback: encode the whole thing except protocol and slashes
+    return encodeURI(rawUrl);
+  }
 }
 
 function extractImageUrl(item) {
@@ -112,9 +135,12 @@ async function cleanOldArticles(monthsOld = 3) {
 async function processSource(sourceDoc) {
   const source = sourceDoc.data();
   const sourceId = sourceDoc.id;
-  const feedUrl = source.stream_link;
+  const rawFeedUrl = source.stream_link;
 
-  if (!feedUrl) return;
+  if (!rawFeedUrl) return;
+
+  // Encode Arabic/Unicode characters in the URL
+  const feedUrl = encodeRssUrl(rawFeedUrl);
 
   const t0 = Date.now();
   let feed;
@@ -127,16 +153,28 @@ async function processSource(sourceDoc) {
   const tFetched = Date.now();
 
   const lastFetched = source.lastFetched?.toDate() || new Date(0);
+
+  // Sort items newest-first, then take max 5
+  const sortedItems = [...feed.items].sort((a, b) => {
+    const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+    const db_ = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+    return db_ - da;
+  });
+
+  const itemsToProcess = sortedItems
+    .filter(item => {
+      const pubDate = item.pubDate ? new Date(item.pubDate) : null;
+      return !pubDate || pubDate > lastFetched;
+    })
+    .slice(0, MAX_ARTICLES_PER_SOURCE);
+
   let batch = db.batch();
   let newCount = 0;
   let skipped = 0;
 
-  for (const item of feed.items) {
+  for (const item of itemsToProcess) {
     const link = item.link || item.guid;
     if (!link) continue;
-
-    const pubDate = item.pubDate ? new Date(item.pubDate) : null;
-    if (pubDate && pubDate <= lastFetched) continue;
 
     const title = item.title?.trim();
     const imageUrl = extractImageUrl(item);
