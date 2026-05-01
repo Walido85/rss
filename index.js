@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import Parser from "rss-parser";
 import crypto from "crypto";
+import https from "https";
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
@@ -147,8 +148,32 @@ async function processSource(sourceDoc) {
   try {
     feed = await withTimeout(parser.parseURL(feedUrl), 20000);
   } catch (err) {
-    console.error(`[${source.name}] fetch failed: ${err.message} (${Date.now() - t0}ms)`);
-    return;
+    // Retry with SSL verification disabled for sites with bad certificates
+    if (err.message && (err.message.includes('certificate') || err.message.includes('SSL') || err.message.includes('CERT'))) {
+      try {
+        const insecureParser = new Parser({
+          timeout: 20000,
+          headers: { "User-Agent": "RSSAggregator/1.0" },
+          requestOptions: { agent: new https.Agent({ rejectUnauthorized: false }) },
+          customFields: {
+            item: [
+              ["media:content", "mediaContent"],
+              ["media:thumbnail", "mediaThumbnail"],
+              ["enclosure", "enclosure"],
+              ["category", "categories"],
+            ],
+          },
+        });
+        feed = await withTimeout(insecureParser.parseURL(feedUrl), 20000);
+        console.warn(`[${source.name}] SSL bypass used`);
+      } catch (retryErr) {
+        console.error(`[${source.name}] fetch failed: ${retryErr.message} (${Date.now() - t0}ms)`);
+        return;
+      }
+    } else {
+      console.error(`[${source.name}] fetch failed: ${err.message} (${Date.now() - t0}ms)`);
+      return;
+    }
   }
   const tFetched = Date.now();
 
