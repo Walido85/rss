@@ -46,14 +46,10 @@ function slugify(text) {
     .slice(0, 100);
 }
 
-// Encode Arabic/Unicode characters in URLs so rss-parser can fetch them
 function encodeRssUrl(rawUrl) {
   try {
-    // Already valid ASCII URL — return as-is
     new URL(rawUrl);
-    // Check if it contains non-ASCII characters
     if (!/[^\x00-\x7F]/.test(rawUrl)) return rawUrl;
-    // Has non-ASCII (Arabic etc.) — encode the path/query parts only
     const url = new URL(rawUrl);
     url.pathname = url.pathname.split("/").map(segment => encodeURIComponent(decodeURIComponent(segment))).join("/");
     url.search = url.search ? "?" + url.search.slice(1).split("&").map(p => {
@@ -62,7 +58,6 @@ function encodeRssUrl(rawUrl) {
     }).join("&") : "";
     return url.toString();
   } catch {
-    // Fallback: encode the whole thing except protocol and slashes
     return encodeURI(rawUrl);
   }
 }
@@ -102,36 +97,6 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-async function cleanOldArticles(monthsOld = 3) {
-  const t0 = Date.now();
-  console.log(`[clean] starting...`);
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - monthsOld);
-  const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoff);
-
-  const oldSnap = await db
-    .collection("rss_articles")
-    .where("fetchedAt", "<", cutoffTimestamp)
-    .get();
-
-  if (oldSnap.empty) {
-    console.log(`[clean] no old articles (${Date.now() - t0}ms)`);
-    return;
-  }
-
-  let batch = db.batch();
-  let count = 0;
-  for (const doc of oldSnap.docs) {
-    batch.delete(doc.ref);
-    count++;
-    if (count % 499 === 0) {
-      await batch.commit();
-      batch = db.batch();
-    }
-  }
-  if (count % 499 !== 0) await batch.commit();
-  console.log(`[clean] deleted ${count} (${Date.now() - t0}ms)`);
-}
 
 async function processSource(sourceDoc) {
   const source = sourceDoc.data();
@@ -140,7 +105,6 @@ async function processSource(sourceDoc) {
 
   if (!rawFeedUrl) return;
 
-  // Encode Arabic/Unicode characters in the URL
   const feedUrl = encodeRssUrl(rawFeedUrl);
 
   const t0 = Date.now();
@@ -148,7 +112,6 @@ async function processSource(sourceDoc) {
   try {
     feed = await withTimeout(parser.parseURL(feedUrl), 20000);
   } catch (err) {
-    // Retry with SSL verification disabled for sites with bad certificates
     if (err.message && (err.message.includes('certificate') || err.message.includes('SSL') || err.message.includes('CERT'))) {
       try {
         const insecureParser = new Parser({
@@ -179,7 +142,6 @@ async function processSource(sourceDoc) {
 
   const lastFetched = source.lastFetched?.toDate() || new Date(0);
 
-  // Sort items newest-first, then take max 5
   const sortedItems = [...feed.items].sort((a, b) => {
     const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
     const db_ = b.pubDate ? new Date(b.pubDate).getTime() : 0;
@@ -256,8 +218,6 @@ async function processSource(sourceDoc) {
 async function run() {
   const tStart = Date.now();
   console.log("RSS Aggregator started");
-
-  await cleanOldArticles(3);
 
   const tQ = Date.now();
   const sourcesSnap = await db
