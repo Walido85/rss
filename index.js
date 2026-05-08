@@ -97,7 +97,6 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-
 async function processSource(sourceDoc) {
   const source = sourceDoc.data();
   const sourceId = sourceDoc.id;
@@ -215,6 +214,22 @@ async function processSource(sourceDoc) {
   );
 }
 
+async function triggerRevalidation() {
+  const SECRET_TOKEN = process.env.REVALIDATION_TOKEN;
+  const SITE_URL = "https://tuniwave.com";
+  const paths = ["/ar/news", "/fr/news", "/en/news"];
+
+  for (const path of paths) {
+    try {
+      const res = await fetch(`${SITE_URL}/api/revalidate?secret=${SECRET_TOKEN}&path=${path}`);
+      const data = await res.json();
+      console.log(`Revalidated ${path}:`, data);
+    } catch (err) {
+      console.error(`Failed to revalidate ${path}:`, err.message);
+    }
+  }
+}
+
 async function run() {
   const tStart = Date.now();
   console.log("RSS Aggregator started");
@@ -229,6 +244,8 @@ async function run() {
   if (sourcesSnap.empty) return;
 
   await Promise.allSettled(sourcesSnap.docs.map(processSource));
+
+  await triggerRevalidation();
 
   console.log(`[total] run() done in ${Date.now() - tStart}ms`);
 }
@@ -246,28 +263,3 @@ async function run() {
     process.exit(process.exitCode || 0);
   }
 })();
-
-
-const SECRET_TOKEN = "walido0000";
-const SITE_URL = "https://tuniwave.com";
-
-const pathsToRevalidate = ["/ar/sports", "/fr/sports", "/en/sports"];
-
-async function triggerFrontendUpdate() {
-  try {
-    const res = await fetch(`${SITE_URL}/api/revalidate?secret=${SECRET_TOKEN}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: pathsToRevalidate }),
-    });
-    
-    const data = await res.json();
-    console.log("Revalidation result:", data);
-  } catch (err) {
-    console.error("Failed to revalidate:", err);
-  }
-}
-
-// Call this at the very end of your scraping function
-await triggerFrontendUpdate();
-
