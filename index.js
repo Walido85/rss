@@ -246,3 +246,28 @@ async function run() {
     process.exit(process.exitCode || 0);
   }
 })();
+
+
+const SECRET_TOKEN = "walido0000";
+const SITE_URL = "https://tuniwave.com";
+
+const pathsToRevalidate = ["/ar/sports", "/fr/sports", "/en/sports"];
+
+async function triggerFrontendUpdate() {
+  try {
+    const res = await fetch(`${SITE_URL}/api/revalidate?secret=${SECRET_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: pathsToRevalidate }),
+    });
+    
+    const data = await res.json();
+    console.log("Revalidation result:", data);
+  } catch (err) {
+    console.error("Failed to revalidate:", err);
+  }
+}
+
+// Call this at the very end of your scraping function
+await triggerFrontendUpdate();
+
