@@ -100,6 +100,8 @@ function sanitizeText(text) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/\s+/g, " ")
+    .replace(/^img\s*/i, "")
+    .replace(/img\s*\{[^}]*\}/gi, "")
     .trim();
 }
 
@@ -232,16 +234,13 @@ async function processSource(sourceDoc) {
 async function triggerRevalidation() {
   const SECRET_TOKEN = process.env.REVALIDATION_TOKEN;
   const SITE_URL = "https://tuniwave.com";
-  const paths = ["/ar/news", "/fr/news", "/en/news"];
 
-  for (const path of paths) {
-    try {
-      const res = await fetch(`${SITE_URL}/api/revalidate?secret=${SECRET_TOKEN}&path=${path}`);
-      const data = await res.json();
-      console.log(`Revalidated ${path}:`, data);
-    } catch (err) {
-      console.error(`Failed to revalidate ${path}:`, err.message);
-    }
+  try {
+    const res = await fetch(`${SITE_URL}/api/revalidate?secret=${SECRET_TOKEN}&type=news`);
+    const data = await res.json();
+    console.log("Revalidation result:", data);
+  } catch (err) {
+    console.error("Failed to revalidate:", err.message);
   }
 }
 
