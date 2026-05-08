@@ -88,6 +88,21 @@ function extractCategories(item) {
     .filter((c) => c.length > 0);
 }
 
+function sanitizeText(text) {
+  if (!text) return "";
+  return text
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "") // remove <style> blocks
+    .replace(/\{[^}]*\}/g, "")                       // remove CSS { ... }
+    .replace(/<[^>]+>/g, "")                          // remove HTML tags
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function withTimeout(promise, ms) {
   return Promise.race([
     promise,
@@ -183,7 +198,7 @@ async function processSource(sourceDoc) {
       title,
       slug,
       link,
-      description: item.contentSnippet || item.summary || "",
+      description: sanitizeText(item.contentSnippet || item.summary || ""),
       imageUrl,
       categories,
       sourceGenre: source.genre || "",
