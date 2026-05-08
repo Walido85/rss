@@ -23,4 +23,5 @@ jobs:
       - name: Run RSS Aggregator
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          REVALIDATION_TOKEN: ${{ secrets.REVALIDATION_TOKEN }}
         run: node index.js
