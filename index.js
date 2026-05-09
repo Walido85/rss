@@ -94,7 +94,7 @@ function sanitizeText(text) {
   if (!text) return "";
   return text
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "") // remove <style> blocks
-    .replace(/\{[^}]*\}/g, "")                       // remove CSS { ... }
+    .replace(/\{[^}]*:[^}]*\}/g, "")                 // remove CSS { property: value }
     .replace(/<[^>]+>/g, "")                          // remove HTML tags
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
