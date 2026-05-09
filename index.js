@@ -31,8 +31,10 @@ function hashLink(link) {
 
 function toTimestamp(dateStr) {
   if (!dateStr) return admin.firestore.Timestamp.now();
+  if (dateStr && typeof dateStr === 'object' && dateStr.toDate) return dateStr;
   const d = new Date(dateStr);
-  return isNaN(d) ? admin.firestore.Timestamp.now() : admin.firestore.Timestamp.fromDate(d);
+  if (isNaN(d.getTime())) return admin.firestore.Timestamp.now();
+  return admin.firestore.Timestamp.fromDate(d);
 }
 
 function slugify(text) {
