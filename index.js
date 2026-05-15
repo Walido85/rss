@@ -93,9 +93,9 @@ function extractCategories(item) {
 function sanitizeText(text) {
   if (!text) return "";
   return text
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "") // remove <style> blocks
-    .replace(/\{[^}]*:[^}]*\}/g, "")                 // remove CSS { property: value }
-    .replace(/<[^>]+>/g, "")                          // remove HTML tags
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\{[^}]*:[^}]*\}/g, "")
+    .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -103,7 +103,7 @@ function sanitizeText(text) {
     .replace(/&quot;/g, '"')
     .replace(/\s+/g, " ")
     .replace(/^img\s*/i, "")
-    .replace(/img\s*\{[^}]*\}/gi, "")
+    .replace(/img\s*\{[^}]*\}/gi, "")
     .trim();
 }
 
@@ -235,7 +235,7 @@ async function processSource(sourceDoc) {
 
 async function triggerRevalidation() {
   const SECRET_TOKEN = process.env.REVALIDATION_TOKEN;
-  const SITE_URL = "https://tuniwave.com";
+  const SITE_URL = "https://twensa.net";
   const paths = ["/ar/news", "/fr/news", "/en/news", "/ar", "/fr", "/en"];
 
   for (const path of paths) {
